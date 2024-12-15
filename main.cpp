@@ -45,7 +45,7 @@ void send_html_file(int client_socket) {
 
 // Функция для отправки изображения
 void send_image(int client_socket) {
-    sleep(10);
+    // sleep(10);
     std::ifstream file(path + "/image.jpg", std::ios::binary);
     if (!file) {
         std::cerr << "Не удалось открыть файл image.jpg.\n";
@@ -86,13 +86,22 @@ void handle_client(int client_socket, sockaddr_in client_address) {
 
     std::cout << "Получен запрос от IP: " << client_ip << ", Порт: " << client_port << std::endl;
 
-    char request[1024] = {0};
-    read(client_socket, request, 1024);
+    char buffer[512] = {0};
+    std::string request;
+
+    ssize_t bytes_read;
+    auto counter = 0;
+    while ((bytes_read = read(client_socket, buffer, sizeof(buffer))) > 0) {
+        request.append(buffer, bytes_read); // Динамически добавляем данные
+        if (request.find("\r\n\r\n") != std::string::npos) {
+            break; // Конец заголовков HTTP
+        }
+    }
 
     // Простая маршрутизация
-    if (strncmp(request, "GET / ", 6) == 0) {
+    if (strncmp(request.c_str(), "GET / ", 6) == 0) {
         send_html_file(client_socket); // Отправляем HTML-файл
-    } else if (strncmp(request, "GET /image.jpg", 14) == 0) {
+    } else if (strncmp(request.c_str(), "GET /image.jpg", 14) == 0) {
         send_image(client_socket); // Отправляем изображение
     } else {
         const char* response =
@@ -152,4 +161,3 @@ int main() {
     close(server_fd);
     return 0;
 }
-
