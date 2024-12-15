@@ -8,6 +8,7 @@
 #include <filesystem>
 
 #include <arpa/inet.h> // Для inet_ntoa()
+#include <thread>
 
 const int PORT = 8080;
 std::string path = std::string(std::filesystem::current_path().parent_path()) + "/resources/";
@@ -44,6 +45,7 @@ void send_html_file(int client_socket) {
 
 // Функция для отправки изображения
 void send_image(int client_socket) {
+    sleep(10);
     std::ifstream file(path + "/image.jpg", std::ios::binary);
     if (!file) {
         std::cerr << "Не удалось открыть файл image.jpg.\n";
@@ -75,6 +77,34 @@ void send_image(int client_socket) {
     delete[] buffer;
 }
 
+
+void handle_client(int client_socket, sockaddr_in client_address) {
+    // Получаем IP-адрес клиента и порт
+    char client_ip[INET_ADDRSTRLEN];
+    inet_ntop(AF_INET, &client_address.sin_addr, client_ip, INET_ADDRSTRLEN);
+    int client_port = ntohs(client_address.sin_port);
+
+    std::cout << "Получен запрос от IP: " << client_ip << ", Порт: " << client_port << std::endl;
+
+    char request[1024] = {0};
+    read(client_socket, request, 1024);
+
+    // Простая маршрутизация
+    if (strncmp(request, "GET / ", 6) == 0) {
+        send_html_file(client_socket); // Отправляем HTML-файл
+    } else if (strncmp(request, "GET /image.jpg", 14) == 0) {
+        send_image(client_socket); // Отправляем изображение
+    } else {
+        const char* response =
+            "HTTP/1.1 404 Not Found\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n\r\n";
+        send(client_socket, response, strlen(response), 0);
+    }
+
+    close(client_socket);  // Закрытие соединения с клиентом
+}
+
 int main() {
     int server_fd = socket(AF_INET, SOCK_STREAM, 0);
     if (server_fd == 0) {
@@ -103,7 +133,7 @@ int main() {
     }
 
     std::filesystem::path current_path = std::filesystem::current_path();
-    std::cout << "Сервер запущен на порту " << PORT << " С текущей директорией: " << current_path << std::endl; "\n";
+    std::cout << "Сервер запущен на порту " << PORT << " с текущей директорией: " << current_path << std::endl;
 
     while (true) {
         sockaddr_in client_address{};
@@ -114,32 +144,12 @@ int main() {
             continue;
         }
 
-        char client_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &client_address.sin_addr, client_ip, INET_ADDRSTRLEN);
-        int client_port = ntohs(client_address.sin_port);
-
-        std::cout << "Получен запрос от IP: " << client_ip << ", Порт: " << client_port << std::endl;
-
-
-        char request[1024] = {0};
-        read(client_socket, request, 1024);
-
-        // Простая маршрутизация
-        if (strncmp(request, "GET / ", 6) == 0) {
-            send_html_file(client_socket); // Отправляем HTML-файл
-        } else if (strncmp(request, "GET /image.jpg", 14) == 0) {
-            send_image(client_socket); // Отправляем изображение
-        } else {
-            const char* response =
-                "HTTP/1.1 404 Not Found\r\n"
-                "Content-Length: 0\r\n"
-                "Connection: close\r\n\r\n";
-            send(client_socket, response, strlen(response), 0);
-        }
-
-        close(client_socket);
+        // Создаем новый поток для обслуживания клиента
+        std::thread client_thread(handle_client, client_socket, client_address);
+        client_thread.detach(); // Отделяем поток от основного, чтобы он мог работать в фоновом режиме
     }
 
     close(server_fd);
     return 0;
 }
+
