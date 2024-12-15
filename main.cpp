@@ -1,82 +1,136 @@
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <cstring>
-#include <thread>
-#include <vector>
-#include <sstream>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <filesystem>
 
 const int PORT = 8080;
-int counter = 0;
+std::string path = "/home/alex/CLionProjects/FirstWebServer/resources/";
 
-void handle_client(int client_socket) {
-    // Буфер для запроса
-    char buffer[1024] = {0};
-    read(client_socket, buffer, 1024);
+// Функция для отправки HTML-файла
+void send_html_file(int client_socket) {
+    std::ifstream file(path + "/index.html");
+    if (!file) {
+        std::cerr << "Не удалось открыть файл index.html.\n";
+        const char* error_response =
+            "HTTP/1.1 404 Not Found\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n\r\n";
+        send(client_socket, error_response, strlen(error_response), 0);
+        return;
+    }
 
-    std::cout << "Получен запрос:" << counter++ << std::endl;
-    // Простой HTTP-ответ
-    std::string response =
+    // Считываем содержимое файла
+    std::string html_content((std::istreambuf_iterator<char>(file)),
+                              std::istreambuf_iterator<char>());
+    file.close();
+
+    // Формируем HTTP-заголовок
+    std::string headers =
         "HTTP/1.1 200 OK\r\n"
         "Content-Type: text/html\r\n"
-        "Connection: close\r\n"
-        "\r\n"
-        "<html><body><h1>Hello, World!</h1></body></html>";
+        "Content-Length: " + std::to_string(html_content.size()) + "\r\n"
+        "Connection: close\r\n\r\n";
 
-    send(client_socket, response.c_str(), response.size(), 0);
+    // Отправляем заголовки и содержимое файла
+    send(client_socket, headers.c_str(), headers.size(), 0);
+    send(client_socket, html_content.c_str(), html_content.size(), 0);
+}
 
-    // Закрыть соединение
-    close(client_socket);
+// Функция для отправки изображения
+void send_image(int client_socket) {
+    std::ifstream file(path + "/image.jpg", std::ios::binary);
+    if (!file) {
+        std::cerr << "Не удалось открыть файл image.jpg.\n";
+        const char* error_response =
+            "HTTP/1.1 404 Not Found\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: close\r\n\r\n";
+        send(client_socket, error_response, strlen(error_response), 0);
+        return;
+    }
+
+    file.seekg(0, std::ios::end);
+    size_t file_size = file.tellg();
+    file.seekg(0, std::ios::beg);
+
+    char* buffer = new char[file_size];
+    file.read(buffer, file_size);
+    file.close();
+
+    std::string headers =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: image/jpeg\r\n"
+        "Content-Length: " + std::to_string(file_size) + "\r\n"
+        "Connection: close\r\n\r\n";
+
+    send(client_socket, headers.c_str(), headers.size(), 0);
+    send(client_socket, buffer, file_size, 0);
+
+    delete[] buffer;
 }
 
 int main() {
-    int server_fd, client_socket;
-    struct sockaddr_in address;
-    int opt = 1;
-    int addrlen = sizeof(address);
-
-    // Создать сокет
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
+    int server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (server_fd == 0) {
         perror("Ошибка создания сокета");
         exit(EXIT_FAILURE);
     }
 
-    // Настройка сокета
-    if (setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt))) {
-        perror("Ошибка setsockopt");
-        exit(EXIT_FAILURE);
-    }
-
+    sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_addr.s_addr = INADDR_ANY;
     address.sin_port = htons(PORT);
 
-    // Привязка сокета к порту
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < 0) {
-        perror("Ошибка bind");
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
+        perror("Ошибка привязки сокета");
+        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
-    // Слушать соединения
     if (listen(server_fd, 10) < 0) {
-        perror("Ошибка listen");
+        perror("Ошибка при прослушивании");
+        close(server_fd);
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Сервер запущен на порту " << PORT << "...\n";
+    std::filesystem::path current_path = std::filesystem::current_path();
+    std::cout << "Сервер запущен на порту " << PORT << " С текущей директорией: " << current_path << std::endl; "\n";
 
-    // Основной цикл обработки клиентов
     while (true) {
-        if ((client_socket = accept(server_fd, (struct sockaddr *)&address, (socklen_t*)&addrlen)) < 0) {
-            perror("Ошибка accept");
-            exit(EXIT_FAILURE);
+        sockaddr_in client_address{};
+        socklen_t client_len = sizeof(client_address);
+        int client_socket = accept(server_fd, (struct sockaddr*)&client_address, &client_len);
+        if (client_socket < 0) {
+            perror("Ошибка при подключении клиента");
+            continue;
         }
 
-        // Обработка клиента в отдельном потоке
-        std::thread(handle_client, client_socket).detach();
+        char request[1024] = {0};
+        read(client_socket, request, 1024);
+
+        // Простая маршрутизация
+        if (strncmp(request, "GET / ", 6) == 0) {
+            send_html_file(client_socket); // Отправляем HTML-файл
+        } else if (strncmp(request, "GET /image.jpg", 14) == 0) {
+            send_image(client_socket); // Отправляем изображение
+        } else {
+            const char* response =
+                "HTTP/1.1 404 Not Found\r\n"
+                "Content-Length: 0\r\n"
+                "Connection: close\r\n\r\n";
+            send(client_socket, response, strlen(response), 0);
+        }
+
+        close(client_socket);
     }
 
+    close(server_fd);
     return 0;
 }
