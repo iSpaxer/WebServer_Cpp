@@ -8,7 +8,7 @@
 #include <filesystem>
 
 const int PORT = 8080;
-std::string path = "/home/alex/CLionProjects/FirstWebServer/resources/";
+std::string path = std::string(std::filesystem::current_path().parent_path()) + "/resources/";
 
 // Функция для отправки HTML-файла
 void send_html_file(int client_socket) {
