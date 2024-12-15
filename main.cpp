@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <filesystem>
 
+#include <arpa/inet.h> // Для inet_ntoa()
+
 const int PORT = 8080;
 std::string path = std::string(std::filesystem::current_path().parent_path()) + "/resources/";
 
@@ -111,6 +113,13 @@ int main() {
             perror("Ошибка при подключении клиента");
             continue;
         }
+
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_address.sin_addr, client_ip, INET_ADDRSTRLEN);
+        int client_port = ntohs(client_address.sin_port);
+
+        std::cout << "Получен запрос от IP: " << client_ip << ", Порт: " << client_port << std::endl;
+
 
         char request[1024] = {0};
         read(client_socket, request, 1024);
